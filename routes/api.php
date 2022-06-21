@@ -6,6 +6,7 @@ use LINE\LINEBot;
 use LINE\LINEBot\Constant\HTTPHeader;
 use LINE\LINEBot\Event\MessageEvent\TextMessage;
 use LINE\LINEBot\HTTPClient\CurlHTTPClient;
+use Tapp\Airtable\Facades\AirtableFacade;
 
 /*
 |--------------------------------------------------------------------------
@@ -38,7 +39,31 @@ Route::post('/webhook', function (Request $request) use ($bot) {
 
     collect($events)->each(function ($event) use ($bot) {
         if ($event instanceof TextMessage) {
-            return $bot->replyText($event->getReplyToken(), $event->getText());
+            if ($event instanceof TextMessage) {
+                if ($event->getText() === '会員カード') {
+                    // 会員登録済みか確認するため、Airtableからデータを取得する
+                    $member = Airtable::where('UserId', $event->getUserId())->get();
+
+                    if ($member->isEmpty()) {
+                        // Airtableに会員データがなければ、生成して登録する
+                        $memberId = strval(rand(1000000000, 9999999999));
+                        $member = Airtable::firstOrCreate([
+                            'UserId' => $event->getUserId(),
+                            'Name' => $bot->getProfile($event->getUserId())->getJSONDecodedBody()['displayName'],
+                            'MemberId' => $memberId,
+                        ]);
+                        Log::debug('Member is created.');
+                    } else {
+                        // Airtableにデータがあれば、取得したデータを利用する
+                        $memberId = $member->first()['fields']['MemberId'];
+                    }
+                    Log::debug($memberId);
+
+                    return $bot->replyText($event->getReplyToken(), "会員IDは {$memberId} です！");
+                } else {
+                    return $bot->replyText($event->getReplyToken(), $event->getText());
+                }
+            }
         }
     });
 
