@@ -6,7 +6,9 @@ use LINE\LINEBot;
 use LINE\LINEBot\Constant\HTTPHeader;
 use LINE\LINEBot\Event\MessageEvent\TextMessage;
 use LINE\LINEBot\HTTPClient\CurlHTTPClient;
+use LINE\LINEBot\MessageBuilder\ImageMessageBuilder;
 use Tapp\Airtable\Facades\AirtableFacade;
+use Picqer\Barcode\BarcodeGeneratorPNG;
 
 /*
 |--------------------------------------------------------------------------
@@ -26,7 +28,9 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
 $httpClient = new CurlHTTPClient($_ENV['LINE_CHANNEL_ACCESS_TOKEN']);
 $bot = new LINEBot($httpClient, ['channelSecret' => $_ENV['LINE_CHANNEL_SECRET']]);
 
-Route::post('/webhook', function (Request $request) use ($bot) {
+$barcodeGenerator = new BarcodeGeneratorPNG();
+
+Route::post('/webhook', function (Request $request) use ($bot, $barcodeGenerator) {
     Log::debug($request);
 
     $signature = $request->header(HTTPHeader::LINE_SIGNATURE);
@@ -37,7 +41,7 @@ Route::post('/webhook', function (Request $request) use ($bot) {
     $events = $bot->parseEventRequest($request->getContent(), $signature);
     Log::debug(['$events' => $events]);
 
-    collect($events)->each(function ($event) use ($bot) {
+    collect($events)->each(function ($event) use ($bot, $barcodeGenerator) {
         if ($event instanceof TextMessage) {
             if ($event instanceof TextMessage) {
                 if ($event->getText() === '会員カード') {
@@ -57,9 +61,19 @@ Route::post('/webhook', function (Request $request) use ($bot) {
                         // Airtableにデータがあれば、取得したデータを利用する
                         $memberId = $member->first()['fields']['MemberId'];
                     }
-                    Log::debug($memberId);
 
-                    return $bot->replyText($event->getReplyToken(), "会員IDは {$memberId} です！");
+                    $barcodeFileName = "{$memberId}.png";
+                    $barcodeFilePath = "public/{$barcodeFileName}";
+                    if (!Storage::exists($barcodeFilePath)) {
+                        $barcodeImage = $barcodeGenerator->getBarcode($memberId, $barcodeGenerator::TYPE_CODE_128);
+                        Storage::put($barcodeFilePath, $barcodeImage);
+                    } else {
+                        $barcodeImage = Storage::get($barcodeFilePath);
+                    }
+
+                    $imageUrl = Config::get('app.url') . '/storage/' . $barcodeFileName;
+                    $imageMessageBuilder = new ImageMessageBuilder($imageUrl, $imageUrl);
+                    return $bot->replyMessage($event->getReplyToken(), $imageMessageBuilder);
                 } else {
                     return $bot->replyText($event->getReplyToken(), $event->getText());
                 }
